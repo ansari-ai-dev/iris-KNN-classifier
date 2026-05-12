@@ -1,0 +1,7 @@
+=== Iris Classification Results ===
+Best k value: 3
+Cross-validation accuracy (5-fold): 0.9576 (95.76%)
+Test set accuracy: 0.8667 (86.67%)
+Precision: 0.8796
+Recall: 0.8667
+F1-Score: 0.8692
