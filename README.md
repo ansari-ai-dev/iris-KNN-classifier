@@ -53,23 +53,38 @@ This project implements a complete machine learning pipeline to classify Iris fl
 ---
 
 ## 📁 Project Structure
-iris_classifier.py
-data.csv
-data_cleaned.csv
-X_train.npy
-X_test.npy
-y_train.npy
-y_test.npy
-label_encoder.pkl
-scaler.pkl
-best_k.txt
 
+iris-knn-classifier/
+│
+├── data/
+│   ├── data.csv
+│   ├── X_train.npy
+│   ├── X_test.npy
+│   ├── data_cleaned.csv
+│   ├── y_train.npy
+│   └── y_test.npy
+│
+├── images/
+│   ├── box_plots.png
+│   ├── confusion_matrix.png
+│   └── k_selection_curve.png
+│
+├── models/
+│   └── best_k.txt
+│   ├── label_encoder.pkl
+│   ├── scaler.pkl
+│
+├── src/
+│   └── iris_classifier.py
+│
+├── README.md
+└── evaluation_results.txt
 ---
 
 ## ▶️ How to Run
 
 1. Install dependencies:
-2. Run the program:
+2. Run the program: python src/iris_classifier.py
 3. Follow the interactive input to classify flowers.
 
 ---
