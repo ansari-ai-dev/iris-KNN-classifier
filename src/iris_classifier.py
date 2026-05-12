@@ -1,1 +1,461 @@
+#STEP ONE
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, precision_score, recall_score, f1_score
+import joblib
 
+print("="*60)
+print("STEP 1: Data Preparation")
+print("="*60)
+
+# Load the data
+df = pd.read_csv('data.csv')
+
+print("First 5 rows of dataset:")
+print(df.head())
+
+# Features (X) - drop 'Id' and 'Species' columns
+X = df.drop(['Id', 'Species'], axis=1)
+y = df['Species']
+
+print(f"\nFeatures shape: {X.shape}")
+print(f"Labels shape: {y.shape}")
+print(f"Feature names: {X.columns.tolist()}")
+print(f"Unique labels: {y.unique()}")
+
+#STEP 2:
+print("\n" + "="*60)
+print("STEP 2: Data Cleaning (Outlier Detection)")
+print("="*60)
+
+# Remove the 'Id' column (not needed for analysis)
+df_clean = df.drop('Id', axis=1)
+
+# Create box plots for each feature
+fig, axes = plt.subplots(1, 4, figsize=(15, 5))
+features = ['SepalLengthCm', 'SepalWidthCm', 'PetalLengthCm', 'PetalWidthCm']
+
+for i, feature in enumerate(features):
+    df_clean.boxplot(column=feature, ax=axes[i])
+    axes[i].set_title(f'Box plot of {feature}')
+    axes[i].set_ylabel('cm')
+
+plt.tight_layout()
+plt.savefig('box_plots.png', dpi=150)
+plt.show()
+
+# Function to detect outliers using IQR method
+def detect_outliers_iqr(data, column):
+    Q1 = data[column].quantile(0.25)
+    Q3 = data[column].quantile(0.75)
+    IQR = Q3 - Q1
+    lower_bound = Q1 - 1.5 * IQR
+    upper_bound = Q3 + 1.5 * IQR
+    outliers = data[(data[column] < lower_bound) | (data[column] > upper_bound)]
+    return outliers, lower_bound, upper_bound
+
+# Detect and count outliers for each feature
+print("Outlier detection results:\n" + "="*40)
+for feature in features:
+    outliers, lower, upper = detect_outliers_iqr(df_clean, feature)
+    print(f"\n{feature}:")
+    print(f"  Normal range: [{lower:.2f}, {upper:.2f}]")
+    print(f"  Number of outliers: {len(outliers)}")
+    if len(outliers) > 0:
+        print(f"  Outlier values: {outliers[feature].tolist()}")
+
+# Remove outliers
+outlier_rows = pd.DataFrame()
+for feature in features:
+    outliers, _, _ = detect_outliers_iqr(df_clean, feature)
+    outlier_rows = pd.concat([outlier_rows, outliers])
+
+outlier_rows = outlier_rows.drop_duplicates()
+print(f"\n{'='*40}")
+print(f"Total rows with outliers: {len(outlier_rows)}")
+print(f"Original dataset size: {len(df_clean)} rows")
+
+# Create cleaned dataset
+df_cleaned = df_clean.drop(outlier_rows.index)
+print(f"Cleaned dataset size: {len(df_cleaned)} rows")
+
+# Save cleaned dataset
+df_cleaned.to_csv('data_cleaned.csv', index=False)
+print("\n✅ Cleaned dataset saved as 'data_cleaned.csv'")
+
+#STEP 3:
+print("\n" + "="*60)
+print("STEP 3: Data Normalization (Z-score) + Train/Test Split")
+print("="*60)
+
+# Load cleaned data
+df = pd.read_csv('data_cleaned.csv')
+
+# Separate features and labels
+X = df.drop('Species', axis=1).values
+y_raw = df['Species'].values
+
+# Encode labels to numbers
+label_encoder = LabelEncoder()
+y = label_encoder.fit_transform(y_raw)
+
+print(f"Label mapping:")
+for i, label in enumerate(label_encoder.classes_):
+    print(f"  {i} → {label}")
+
+# Z-score normalization
+scaler = StandardScaler()
+X_normalized = scaler.fit_transform(X)
+
+print(f"\nOriginal feature means: {X.mean(axis=0).round(2)}")
+print(f"Original feature stds: {X.std(axis=0).round(2)}")
+print(f"\nAfter normalization - means: {X_normalized.mean(axis=0).round(10)}")
+print(f"After normalization - stds: {X_normalized.std(axis=0).round(2)}")
+
+# Split into train (80%) and test (20%)
+X_train, X_test, y_train, y_test = train_test_split(
+    X_normalized, y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
+)
+
+print(f"\n✅ Train/Test split complete!")
+print(f"Training set size: {X_train.shape[0]} samples")
+print(f"Test set size: {X_test.shape[0]} samples")
+
+print(f"\nClass distribution in TRAINING set:")
+for i, label in enumerate(label_encoder.classes_):
+    count = np.sum(y_train == i)
+    print(f"  {label}: {count}")
+
+print(f"\nClass distribution in TEST set:")
+for i, label in enumerate(label_encoder.classes_):
+    count = np.sum(y_test == i)
+    print(f"  {label}: {count}")
+
+# Save all necessary files
+np.save('X_train.npy', X_train)
+np.save('X_test.npy', X_test)
+np.save('y_train.npy', y_train)
+np.save('y_test.npy', y_test)
+joblib.dump(label_encoder, 'label_encoder.pkl')
+joblib.dump(scaler, 'scaler.pkl')
+
+print("\n✅ Saved training/test sets and encoders")
+
+#STEP 4:
+print("\n" + "="*60)
+print("STEP 4: Selection of Optimal k Value (Cross-Validation)")
+print("="*60)
+
+# Load data
+X_train = np.load('X_train.npy')
+y_train = np.load('y_train.npy')
+X_test = np.load('X_test.npy')
+y_test = np.load('y_test.npy')
+
+# Try k values from 1 to 30
+k_values = list(range(1, 32))
+cv_scores = []
+
+print("\n📊 5-fold Cross-validation in progress...")
+print("-"*50)
+
+for k in k_values:
+    knn = KNeighborsClassifier(n_neighbors=k)
+    scores = cross_val_score(knn, X_train, y_train, cv=5, scoring='accuracy')
+    cv_scores.append(scores.mean())
+    print(f"k={k:2d}: accuracy = {scores.mean():.4f} (±{scores.std():.4f})")
+
+# Find best k
+best_k = k_values[np.argmax(cv_scores)]
+best_cv_accuracy = max(cv_scores)
+
+print("-"*50)
+print(f"\n✅ Best k value: {best_k}")
+print(f"✅ Best cross-validation accuracy: {best_cv_accuracy:.4f} ({best_cv_accuracy*100:.2f}%)")
+
+# Plot error rate vs k - FIXED to show ALL k values (1 to 30)
+error_rates = [1 - acc for acc in cv_scores]
+
+plt.figure(figsize=(14, 6))
+plt.plot(k_values, error_rates, 'bo-', linewidth=2, markersize=6)
+
+# 👇 KEY FIX: Show EVERY k value on x-axis (1 to 30)
+plt.xticks(k_values, rotation=45, fontsize=9)
+
+# Highlight best k
+plt.plot(best_k, 1 - best_cv_accuracy, 'ro', markersize=12, label=f'Best k = {best_k}')
+
+plt.xlabel('k Value (Number of Neighbors)', fontsize=12)
+plt.ylabel('Error Rate (1 - Accuracy)', fontsize=12)
+plt.title('k-Value Selection using 5-fold Cross-Validation', fontsize=14)
+plt.grid(True, alpha=0.3)
+plt.legend()
+
+# Optional: Add value labels for every 5th k
+for k in k_values:
+    if k % 5 == 0:
+        plt.annotate(f'{error_rates[k-1]:.3f}', 
+                    xy=(k, error_rates[k-1]),
+                    xytext=(0, 10), textcoords='offset points',
+                    ha='center', fontsize=8, color='gray')
+
+plt.tight_layout()
+plt.savefig('k_selection_curve.png', dpi=150)
+plt.show()
+
+print("\n📁 Plot saved as 'k_selection_curve.png' - Now shows ALL k values (1-30)")
+
+# Save best k
+with open('best_k.txt', 'w') as f:
+    f.write(str(best_k))
+
+
+#STEP 5:
+print("\n" + "="*60)
+print("STEP 5: Train and Evaluate KNN Model")
+print("="*60)
+
+# Load data
+X_train = np.load('X_train.npy')
+X_test = np.load('X_test.npy')
+y_train = np.load('y_train.npy')
+y_test = np.load('y_test.npy')
+label_encoder = joblib.load('label_encoder.pkl')
+
+# Load best k
+with open('best_k.txt', 'r') as f:
+    best_k = int(f.read())
+
+print(f"🎯 Training KNN with k = {best_k}")
+
+# Train model
+knn = KNeighborsClassifier(n_neighbors=best_k)
+knn.fit(X_train, y_train)
+
+# Predict
+y_pred = knn.predict(X_test)
+
+# Calculate accuracy
+test_accuracy = accuracy_score(y_test, y_pred)
+print(f"\n📊 Test Set Accuracy: {test_accuracy:.4f} ({test_accuracy*100:.2f}%)")
+
+# Compare CV accuracy vs Test accuracy
+print(f"\n📈 Accuracy Comparison:")
+print(f"   Cross-validation accuracy: {best_cv_accuracy:.4f} ({best_cv_accuracy*100:.2f}%)")
+print(f"   Test set accuracy:         {test_accuracy:.4f} ({test_accuracy*100:.2f}%)")
+print(f"   Difference:                {abs(best_cv_accuracy - test_accuracy):.4f}")
+
+# Predicted vs True (first 15)
+print("\n" + "="*60)
+print("Predicted vs True Labels (First 15 test samples):")
+print("="*60)
+print(f"{'Index':<6} {'Predicted':<20} {'True':<20} {'Correct?':<10}")
+print("-"*60)
+
+correct_count = 0
+for i in range(min(15, len(y_test))):
+    pred_name = label_encoder.inverse_transform([y_pred[i]])[0]
+    true_name = label_encoder.inverse_transform([y_test[i]])[0]
+    correct = "✅" if y_pred[i] == y_test[i] else "❌"
+    if y_pred[i] == y_test[i]:
+        correct_count += 1
+    print(f"{i:<6} {pred_name:<20} {true_name:<20} {correct:<10}")
+
+# Classification Report
+print("\n" + "="*60)
+print("Detailed Classification Report:")
+print("="*60)
+print(classification_report(y_test, y_pred, target_names=label_encoder.classes_))
+
+# Confusion Matrix
+cm = confusion_matrix(y_test, y_pred)
+
+plt.figure(figsize=(8, 6))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+            xticklabels=label_encoder.classes_,
+            yticklabels=label_encoder.classes_)
+plt.xlabel('Predicted', fontsize=12)
+plt.ylabel('True', fontsize=12)
+plt.title(f'Confusion Matrix (k={best_k}, Test Accuracy={test_accuracy:.2%})', fontsize=14)
+plt.tight_layout()
+plt.savefig('confusion_matrix.png', dpi=150)
+plt.show()
+
+# Additional Metrics
+precision = precision_score(y_test, y_pred, average='weighted')
+recall = recall_score(y_test, y_pred, average='weighted')
+f1 = f1_score(y_test, y_pred, average='weighted')
+
+print("\n" + "="*60)
+print("Summary Metrics (Weighted Average):")
+print("="*60)
+print(f"Precision: {precision:.4f}")
+print(f"Recall:    {recall:.4f}")
+print(f"F1-Score:  {f1:.4f}")
+print(f"Accuracy:  {test_accuracy:.4f}")
+
+# Analysis
+incorrect_indices = np.where(y_pred != y_test)[0]
+correct_indices = np.where(y_pred == y_test)[0]
+
+print(f"\n📈 Final Analysis:")
+print(f"  Total test samples: {len(y_test)}")
+print(f"  Correct predictions: {len(correct_indices)}")
+print(f"  Incorrect predictions: {len(incorrect_indices)}")
+
+if len(incorrect_indices) > 0:
+    print(f"\n❌ Misclassified test sample indices: {incorrect_indices.tolist()}")
+    print("\n   Check these samples in your original data to understand why.")
+else:
+    print("\n🎉 Perfect! No misclassifications on the test set!")
+
+# Save results
+with open('evaluation_results.txt', 'w') as f:
+    f.write(f"=== Iris Classification Results ===\n")
+    f.write(f"Best k value: {best_k}\n")
+    f.write(f"Cross-validation accuracy (5-fold): {best_cv_accuracy:.4f} ({best_cv_accuracy*100:.2f}%)\n")
+    f.write(f"Test set accuracy: {test_accuracy:.4f} ({test_accuracy*100:.2f}%)\n")
+    f.write(f"Precision: {precision:.4f}\n")
+    f.write(f"Recall: {recall:.4f}\n")
+    f.write(f"F1-Score: {f1:.4f}\n")
+
+
+#STEP 6:
+# STEP 6: User Input Functionality (Interactive Prediction)
+print("\n" + "="*60)
+print("STEP 6: Interactive Flower Classifier")
+print("="*60)
+
+def predict_flower():
+    """
+    Interactive function that asks user for flower measurements
+    and returns the predicted species.
+    """
+    print("\n🌸 Welcome to the Iris Flower Classifier! 🌸")
+    print("-" * 50)
+    print("Please enter the following measurements in centimeters (cm):")
+    print("-" * 50)
+    
+    # Get user input with error handling
+    try:
+        sepal_length = float(input("Sepal Length (cm): "))
+        sepal_width = float(input("Sepal Width (cm): "))
+        petal_length = float(input("Petal Length (cm): "))
+        petal_width = float(input("Petal Width (cm): "))
+        
+        # Validate input ranges (based on Iris dataset)
+        if not (3.0 <= sepal_length <= 8.0):
+            print("⚠️ Warning: Sepal length outside typical range (3.0-8.0 cm)")
+        if not (1.5 <= sepal_width <= 4.5):
+            print("⚠️ Warning: Sepal width outside typical range (1.5-4.5 cm)")
+        if not (1.0 <= petal_length <= 7.0):
+            print("⚠️ Warning: Petal length outside typical range (1.0-7.0 cm)")
+        if not (0.1 <= petal_width <= 2.5):
+            print("⚠️ Warning: Petal width outside typical range (0.1-2.5 cm)")
+        
+        # Create feature array
+        user_input = np.array([[sepal_length, sepal_width, petal_length, petal_width]])
+        
+        # Load the scaler (fitted on training data)
+        scaler = joblib.load('scaler.pkl')
+        
+        # Normalize the input (CRITICAL! Must use same scaler)
+        user_input_normalized = scaler.transform(user_input)
+        
+        # Make prediction
+        prediction_numeric = knn.predict(user_input_normalized)[0]
+        
+        # Convert numeric prediction back to flower name
+        label_encoder = joblib.load('label_encoder.pkl')
+        prediction = label_encoder.inverse_transform([prediction_numeric])[0]
+        
+        # Get confidence (distance to nearest neighbors)
+        distances, indices = knn.kneighbors(user_input_normalized)
+        avg_distance = distances.mean()
+        
+        # Display result
+        print("\n" + "="*50)
+        print("🔮 PREDICTION RESULT 🔮")
+        print("="*50)
+        print(f"📊 Input measurements:")
+        print(f"   • Sepal Length: {sepal_length} cm")
+        print(f"   • Sepal Width:  {sepal_width} cm")
+        print(f"   • Petal Length: {petal_length} cm")
+        print(f"   • Petal Width:  {petal_width} cm")
+        print(f"\n🌺 Predicted Species: **{prediction}**")
+        print(f"📈 Confidence: {1/(1+avg_distance):.2%} (based on neighbor distances)")
+        
+        # Add helpful tips
+        if avg_distance > 2.0:
+            print("\n⚠️ Note: Your input is quite different from training data.")
+            print("   Prediction may be less reliable.")
+        
+        return prediction
+        
+    except ValueError:
+        print("\n❌ Error: Please enter valid numbers only!")
+        return None
+    except Exception as e:
+        print(f"\n❌ An error occurred: {e}")
+        return None
+
+# Function to run multiple predictions
+def run_classifier():
+    """Run the interactive classifier with option to predict multiple flowers."""
+    print("\n" + "="*60)
+    print("🌿 IRIS FLOWER CLASSIFIER - INTERACTIVE MODE 🌿")
+    print("="*60)
+    
+    while True:
+        predict_flower()
+        
+        # Ask if user wants to continue
+        print("\n" + "-"*50)
+        again = input("Would you like to classify another flower? (yes/no): ").strip().lower()
+        if again not in ['yes', 'y']:
+            print("\n👋 Thank you for using the Iris Flower Classifier!")
+            break
+        print("\n" + "="*50)
+
+# Run the interactive classifier
+run_classifier()
+
+# Bonus: Batch prediction from CSV file
+def batch_predict_from_csv(filename='new_flowers.csv'):
+    """
+    Optional: Predict multiple flowers from a CSV file
+    CSV format: SepalLengthCm,SepalWidthCm,PetalLengthCm,PetalWidthCm
+    """
+    try:
+        import pandas as pd
+        df_new = pd.read_csv(filename)
+        print(f"\n📁 Loading new flowers from '{filename}'...")
+        
+        scaler = joblib.load('scaler.pkl')
+        label_encoder = joblib.load('label_encoder.pkl')
+        
+        X_new = scaler.transform(df_new.values)
+        predictions = knn.predict(X_new)
+        flower_names = label_encoder.inverse_transform(predictions)
+        
+        print("\n📊 Batch Prediction Results:")
+        print("-"*50)
+        for i, (_, row) in enumerate(df_new.iterrows()):
+            print(f"Flower {i+1}: {row.values} → {flower_names[i]}")
+        
+        return flower_names
+    except FileNotFoundError:
+        print(f"\nℹ️ No batch file found. Create '{filename}' for batch predictions.")
+    except Exception as e:
+        print(f"Error in batch prediction: {e}")
+
+# Optional: Uncomment to run batch prediction
+# batch_predict_from_csv('new_flowers.csv')
