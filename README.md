@@ -39,6 +39,19 @@ This project implements a complete machine learning pipeline to classify Iris fl
 
 ---
 
+## 📊 Visualizations
+
+### 📦 Feature Distribution (Box Plots)
+![Box Plots](box_plots.png)
+
+### 📉 K Value Selection Curve
+![K Selection](k_selection_curve.png)
+
+### 🔍 Confusion Matrix
+![Confusion Matrix](confusion_matrix.png)
+
+---
+
 ## 📁 Project Structure
 iris_classifier.py
 data.csv
